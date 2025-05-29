@@ -80,25 +80,25 @@ function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) 
 
 
 interface DynamicMapRendererProps {
-  nodes: Node[];
-  links: [number, number][];
-  search: string;
-  selectedNode: number | null;
-  startNode: number | null;
-  endNode: number | null;
-  radius: number;
-  onNodeClick: (index: number) => void;
+  nodes?: Node[];
+  links?: [number, number][];
+  search?: string;
+  selectedNode?: number | null;
+  startNode?: number | null;
+  endNode?: number | null;
+  radius?: number;
+  onNodeClick?: (index: number) => void;
 }
 
 const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
-  nodes,
-  links,
-  search,
-  selectedNode,
-  startNode,
-  endNode,
-  radius,
-  onNodeClick,
+  nodes = [],
+  links = [],
+  search = '',
+  selectedNode = null,
+  startNode = null,
+  endNode = null,
+  radius = 10,
+  onNodeClick = () => {},
 }) => {
   const controlsRef = useRef<OrbitControlsImpl>();
 
