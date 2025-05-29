@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useMemo, useRef, useEffect, Suspense, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Text as DreiText, Line as DreiLine } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
@@ -55,7 +55,7 @@ type PivotProps = {
   controlsRef: React.RefObject<OrbitControlsImpl | undefined>;
 };
 function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) {
-  const { camera } = useThree();
+  const { camera } = useThree(); // This line requires useThree
   useEffect(() => {
     const controls = controlsRef.current;
     if (selectedNode !== null && controls && points[selectedNode]) {
@@ -72,9 +72,12 @@ function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) 
       }
       
       // Smoothly interpolate camera position and target
-      camera.position.lerp(newCameraPosition, 0.1);
-      controls.target.lerp(targetPoint, 0.1);
-      controls.update(); // Required after manually changing controls.target
+      // Ensure camera and controls are defined before lerping
+      if (camera && controls.target) {
+        camera.position.lerp(newCameraPosition, 0.1);
+        controls.target.lerp(targetPoint, 0.1);
+        controls.update(); // Required after manually changing controls.target
+      }
     }
   }, [selectedNode, points, radius, camera, controlsRef]); // Added camera and controlsRef to dependencies
   return null;
@@ -297,3 +300,4 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
 };
 
 export default DynamicMapRenderer;
+
