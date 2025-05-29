@@ -1,10 +1,9 @@
 
 'use client';
 
-import React, { useState, useMemo, useRef, useEffect, Suspense } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Text as DreiText, Line as DreiLine } from '@react-three/drei';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,11 +11,10 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import yaml from 'js-yaml';
 import JSZip from 'jszip';
-import * as THREE from 'three';
 import { Loader2, XCircle, UploadCloud, SearchIcon } from 'lucide-react';
 import AppHeader from '@/components/layout/app-header';
 
-// Node and Link types
+// Node type (can be moved to a shared types file if used elsewhere)
 interface Node {
   id: string;
   type?: string;
@@ -25,66 +23,15 @@ interface Node {
   title?: string;
 }
 
-// Simple 3D point interface
-interface Point3D {
-  x: number;
-  y: number;
-  z: number;
-}
-
-// Utility: Fibonacci sphere distribution for node placement
-function generateSpherePoints(count: number, radius: number): Point3D[] {
-  const points: Point3D[] = [];
-  if (count === 0) return points;
-  const phi = Math.PI * (3 - Math.sqrt(5)); // golden angle in radians
-  for (let i = 0; i < count; i++) {
-    const y = count === 1 ? 0 : 1 - (i / (Math.max(1, count - 1))) * 2; // Avoid division by zero if count is 1
-    const r = Math.sqrt(1 - y * y);
-    const theta = phi * i;
-    const x = Math.cos(theta) * r;
-    const z = Math.sin(theta) * r;
-    points.push({ x: x * radius, y: y * radius, z: z * radius });
-  }
-  return points;
-}
-
-// Pivot effect component (Temporarily removed for diagnostics)
-/*
-type PivotProps = {
-  selectedNode: number | null;
-  points: Point3D[];
-  radius: number;
-  controlsRef: React.RefObject<OrbitControlsImpl | undefined>;
-};
-function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) {
-  const { camera } = useThree();
-  useEffect(() => {
-    const controls = controlsRef.current;
-    if (selectedNode !== null && controls && points[selectedNode]) {
-      const targetPoint = new THREE.Vector3(points[selectedNode].x, points[selectedNode].y, points[selectedNode].z);
-      const distance = radius * 2.5;
-      
-      const newCameraPosition = new THREE.Vector3();
-      if (targetPoint.lengthSq() === 0) { 
-        newCameraPosition.set(0, 0, distance);
-      } else {
-        newCameraPosition.copy(targetPoint).normalize().multiplyScalar(distance);
-      }
-
-      camera.position.lerp(newCameraPosition, 0.1);
-      controls.target.lerp(targetPoint, 0.1);
-      controls.update();
-    }
-  }, [selectedNode, points, radius, camera, controlsRef]);
-  return null;
-}
-*/
-
-// Helper component to load texture for image nodes
-function TextureLoaderHelper({ url }: { url: string }) {
-  const texture = useMemo(() => new THREE.TextureLoader().load(url), [url]);
-  return <primitive object={texture} attach="map" />;
-}
+const DynamicMapRenderer = dynamic(() => import('@/components/graph/dynamic-map-renderer'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-muted/20 rounded-lg shadow-inner">
+      <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      <p className="ml-4 text-lg text-foreground">Loading 3D Map...</p>
+    </div>
+  ),
+});
 
 
 export default function KnowledgeMap3D() {
@@ -111,12 +58,10 @@ export default function KnowledgeMap3D() {
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
   const [startNode, setStartNode] = useState<number | null>(null);
   const [endNode, setEndNode] = useState<number | null>(null);
-  const [pathPoints, setPathPoints] = useState<Point3D[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const radius = 10;
+  const radius = 10; // This can be a prop for DynamicMapRenderer if needed
   const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
-  const controlsRef = useRef<OrbitControlsImpl>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -207,7 +152,7 @@ export default function KnowledgeMap3D() {
         else if (file.type === 'application/pdf') {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: 'pdf', url });
-          if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
+          if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node if others exist
             fileLinks.push([newNodeBaseIdx, 0]); 
           }
           console.log(`${file.name} (PDF) added.`);
@@ -221,7 +166,7 @@ export default function KnowledgeMap3D() {
         else if (file.type.startsWith('image/')) {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: 'image', url });
-           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
+           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node
             fileLinks.push([newNodeBaseIdx, 0]);
           }
           console.log(`${file.name} (Image) added.`);
@@ -229,7 +174,7 @@ export default function KnowledgeMap3D() {
         else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: ext, url });
-           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
+           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node
             fileLinks.push([newNodeBaseIdx, 0]);
           }
           console.log(`${file.name} (Media) added.`);
@@ -238,15 +183,17 @@ export default function KnowledgeMap3D() {
           const data = await file.arrayBuffer();
           const zip = await JSZip.loadAsync(data);
           const zipFilePromises: Promise<{nodes: Node[], links: [number,number][]}>[] = [];
-          let nestedBaseIndex = newNodeBaseIdx + fileNodes.length;
+          let nestedBaseIndex = newNodeBaseIdx + fileNodes.length; // Keep track of index for nested files
           for (const entryName of Object.keys(zip.files)) {
             const entry = zip.files[entryName];
             if (!entry.dir) {
               zipFilePromises.push(
                 entry.async('blob').then(async blob => {
                   const zippedFile = new File([blob], entryName, { type: blob.type });
+                  // Pass the current base index for nested processing
                   const result = await processFile(zippedFile, nestedBaseIndex);
-                  nestedBaseIndex += result.nodes.length;
+                  // Update base index for the next nested file based on nodes added by current one
+                  nestedBaseIndex += result.nodes.length; 
                   return result;
                 })
               );
@@ -270,7 +217,7 @@ export default function KnowledgeMap3D() {
       return { nodes: fileNodes, links: fileLinks };
     };
 
-    let currentTotalNodes = nodes.length;
+    let currentTotalNodes = nodes.length; // Base index for new nodes from current batch of files
     for (const file of files) {
       const result = await processFile(file, currentTotalNodes + newNodesBatch.length);
       newNodesBatch.push(...result.nodes);
@@ -286,15 +233,18 @@ export default function KnowledgeMap3D() {
     setIsLoading(false);
   };
 
-
-  const points = useMemo(() => generateSpherePoints(nodes.length, radius), [nodes.length, radius]);
-
   const handleNodeClick = (i: number) => {
+    if (i === -1) { 
+      setSelectedNode(null);
+      // Optionally, also clear path selection if a click outside deselects nodes.
+      // setStartNode(null);
+      // setEndNode(null);
+      return;
+    }
     setSelectedNode(i);
     if (startNode === null || (startNode !== null && endNode !== null)) {
       setStartNode(i);
       setEndNode(null);
-      setPathPoints([]);
     } else if (endNode === null && i !== startNode) {
       setEndNode(i);
     }
@@ -303,7 +253,6 @@ export default function KnowledgeMap3D() {
   const clearPath = () => {
     setStartNode(null);
     setEndNode(null);
-    setPathPoints([]);
   };
 
   const clearMap = () => {
@@ -312,98 +261,9 @@ export default function KnowledgeMap3D() {
     setSelectedNode(null);
     setStartNode(null);
     setEndNode(null);
-    setPathPoints([]);
     setSearch('');
     console.log("Map Cleared: The knowledge map has been reset.");
     alert("Map Cleared: The knowledge map has been reset.");
-  };
-
-  useEffect(() => {
-    if (startNode !== null && endNode !== null && points[startNode] && points[endNode]) {
-      const p1Vec = new THREE.Vector3(points[startNode].x, points[startNode].y, points[startNode].z);
-      const p2Vec = new THREE.Vector3(points[endNode].x, points[endNode].y, points[endNode].z);
-      
-      const arcForThree: THREE.Vector3[] = [];
-      const steps = Math.max(2, Math.floor(p1Vec.angleTo(p2Vec) * radius / 0.5)); 
-
-      for (let t = 0; t <= steps; t++) {
-        const f = t / steps;
-        const pt = new THREE.Vector3().copy(p1Vec).slerp(p2Vec, f);
-        if (pt.lengthSq() > 0) {
-             arcForThree.push(pt.normalize().multiplyScalar(radius));
-        } else { 
-            arcForThree.push(new THREE.Vector3().copy(p1Vec).lerp(p2Vec,f));
-        }
-      }
-      setPathPoints(arcForThree.map(v => ({ x: v.x, y: v.y, z: v.z })));
-    }
-  }, [startNode, endNode, points, radius]);
-
-  const matches = useMemo(() => {
-    if (!search) return new Set<number>();
-    const lowerSearch = search.toLowerCase();
-    return new Set(
-      nodes.reduce<number[]>((acc, n, idx) => {
-        const titleMatch = n.title && n.title.toLowerCase().includes(lowerSearch);
-        const idMatch = n.id.toLowerCase().includes(lowerSearch);
-        if (titleMatch || idMatch) acc.push(idx);
-        return acc;
-      }, [])
-    );
-  }, [search, nodes]);
-
-  const displayedLinks = useMemo(() => {
-    if (nodes.length === 0) return [];
-    const validLinks = links.filter(([a,b]) => a >= 0 && a < nodes.length && b >= 0 && b < nodes.length && a !==b );
-    if (!search) return validLinks;
-    return validLinks.filter(([a, b]) => matches.has(a) || matches.has(b));
-  }, [search, matches, links, nodes.length]);
-
-  interface NodeMeshProps {
-    position: Point3D;
-    data: Node;
-    highlight: boolean;
-    index: number;
-    isStart?: boolean;
-    isEnd?: boolean;
-    onClick: (index: number) => void;
-  }
-
-  const NodeMesh = ({ position, data, highlight, index, isStart, isEnd, onClick: handleNodeClickProp }: NodeMeshProps) => {
-    let color = 'hsl(var(--primary))';
-    if (isStart) color = 'lime';
-    else if (isEnd) color = 'orange';
-    else if (highlight) color = 'hsl(var(--accent))';
-
-    return (
-      <group position={[position.x, position.y, position.z]} onClick={(e) => { e.stopPropagation(); handleNodeClickProp(index);}}>
-        <mesh>
-          <sphereGeometry args={[0.3, 16, 16]} />
-          <meshStandardMaterial color={color} roughness={0.5} metalness={0.1}/>
-        </mesh>
-        <DreiText
-            position={[0, 0.5, 0]}
-            fontSize={0.2}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.01}
-            outlineColor="#333333"
-          >
-          {data.title || data.id}
-        </DreiText>
-        {data.url && data.type === 'image' && (
-           <mesh position={[0, 0, 0.4]} rotation={[0, Math.PI, 0]}>        
-            <planeGeometry args={[0.5, 0.5]} />
-            <meshBasicMaterial transparent side={THREE.DoubleSide}>
-                <Suspense fallback={null}>
-                    <TextureLoaderHelper url={data.url} />
-                </Suspense>
-            </meshBasicMaterial>
-          </mesh>
-        )}
-      </group>
-    );
   };
 
   return (
@@ -485,71 +345,21 @@ export default function KnowledgeMap3D() {
             </Card>
           )}
 
-          {isClientMounted && (
-            <Canvas 
-              shadows 
-              camera={{ position: [0, 0, radius * 2.5], fov: 50 }} 
-              style={{ background: 'hsl(var(--background))' }}
-              onPointerMissed={() => setSelectedNode(null)}
-              >
-              <ambientLight intensity={0.8} />
-              <directionalLight 
-                  position={[5, 10, 7.5]} 
-                  intensity={1.2} 
-                  castShadow 
-                  shadow-mapSize-width={1024} 
-                  shadow-mapSize-height={1024}
-              />
-              <pointLight position={[-5, -5, -10]} intensity={0.5} color="hsl(var(--accent))" />
-              
-              <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} />
-              
-              {/* Temporarily removed for diagnostics 
-              {points.length > 0 && <PivotEffect selectedNode={selectedNode} points={points} radius={radius} controlsRef={controlsRef} />}
-              */}
-
-              <Suspense fallback={null}>
-                {nodes.map((node, i) => points[i] && (
-                  <NodeMesh
-                    key={`${node.id}-${i}-${node.title || i}`}
-                    index={i}
-                    position={points[i]}
-                    data={node}
-                    highlight={matches.has(i)}
-                    isStart={i === startNode}
-                    isEnd={i === endNode}
-                    onClick={handleNodeClick}
-                  />
-                ))}
-              </Suspense>
-
-              {displayedLinks.map(([a, b], idx) => {
-                if (!points[a] || !points[b]) return null;
-                return (
-                  <DreiLine 
-                    key={`link-${idx}-${a}-${b}`}
-                    points={[[points[a].x, points[a].y, points[a].z], [points[b].x, points[b].y, points[b].z]]}
-                    lineWidth={1}
-                    color={
-                      matches.has(a) || matches.has(b)
-                        ? 'hsl(var(--accent))'
-                        : 'hsl(var(--primary))' 
-                    }
-                    dashed={false}
-                  />
-                );
-              })}
-
-              {pathPoints.length > 1 && (
-                <DreiLine 
-                    points={pathPoints.map(p => [p.x, p.y, p.z])} 
-                    lineWidth={2.5} color="yellow" dashed={true} dashSize={0.2} gapSize={0.1} />
-              )}
-            </Canvas>
-          )}
-          {!isClientMounted && (
-            <div className="w-full h-full flex items-center justify-center">
-              <Loader2 className="h-16 w-16 animate-spin text-primary" />
+          {isClientMounted ? (
+            <DynamicMapRenderer
+              nodes={nodes}
+              links={links}
+              search={search}
+              selectedNode={selectedNode}
+              startNode={startNode}
+              endNode={endNode}
+              radius={radius}
+              onNodeClick={handleNodeClick}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-muted/20 rounded-lg shadow-inner">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="ml-4 text-lg text-foreground">Initializing Map...</p>
             </div>
           )}
         </div>
@@ -557,5 +367,3 @@ export default function KnowledgeMap3D() {
     </div>
   );
 }
-
-    
