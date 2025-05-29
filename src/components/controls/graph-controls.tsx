@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import FileUploadButton from './file-upload-button';
 import { Button } from '@/components/ui/button';
-import { Search, FileJson, FileText, Trash2 } from 'lucide-react';
+import { Search, FileJson, FileText, Trash2, UploadCloud } from 'lucide-react';
 
 interface GraphControlsProps {
   searchTerm: string;
@@ -57,6 +57,15 @@ const GraphControls: React.FC<GraphControlsProps> = ({
             icon={<FileText className="h-5 w-5" />}
           >
             Upload PDF
+          </FileUploadButton>
+          <FileUploadButton
+            onFileSelect={onPdfUpload} // Reusing PDF upload logic for now
+            accept=".pdf" // Assuming PDFs from Drive for now
+            variant="outline"
+            icon={<UploadCloud className="h-5 w-5" />}
+            className="sm:col-span-2" // Make it full width on sm screens if it's the third item
+          >
+            Upload from Drive
           </FileUploadButton>
         </div>
         
