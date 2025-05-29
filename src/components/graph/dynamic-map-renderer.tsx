@@ -1,11 +1,12 @@
 
 'use client';
 
-import React, { useMemo, useRef, useEffect, Suspense } from 'react';
+import React, { useMemo, useRef, useEffect, Suspense, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Text as DreiText, Line as DreiLine } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
+import { Loader2 } from 'lucide-react';
 
 // Interfaces
 interface Node {
@@ -29,7 +30,7 @@ function generateSpherePoints(count: number, radius: number): Point3D[] {
   const phi = Math.PI * (3 - Math.sqrt(5)); // golden angle in radians
   for (let i = 0; i < count; i++) {
     // y goes from 1 to -1, ensure (count - 1) is not 0 for single node
-    const y = count === 1 ? 0 : 1 - (i / (Math.max(1, count - 1))) * 2; 
+    const y = count === 1 ? 0 : 1 - (i / (Math.max(1, count - 1))) * 2;
     const r = Math.sqrt(1 - y * y);
     const theta = phi * i;
     const x = Math.cos(theta) * r;
@@ -60,20 +61,22 @@ function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) 
     if (selectedNode !== null && controls && points[selectedNode]) {
       const targetPoint3D = points[selectedNode];
       const targetPoint = new THREE.Vector3(targetPoint3D.x, targetPoint3D.y, targetPoint3D.z);
-      const distance = radius * 2.5;
-      
+      const distance = radius * 2.5; // Increased distance
+
       const newCameraPosition = new THREE.Vector3();
+      // Handle case where targetPoint is at origin to avoid normalizing a zero vector
       if (targetPoint.lengthSq() === 0) { 
-        newCameraPosition.set(0, 0, distance);
+        newCameraPosition.set(0, 0, distance); // Default position if target is origin
       } else {
         newCameraPosition.copy(targetPoint).normalize().multiplyScalar(distance);
       }
-
+      
+      // Smoothly interpolate camera position and target
       camera.position.lerp(newCameraPosition, 0.1);
       controls.target.lerp(targetPoint, 0.1);
-      controls.update();
+      controls.update(); // Required after manually changing controls.target
     }
-  }, [selectedNode, points, radius, camera, controlsRef]);
+  }, [selectedNode, points, radius, camera, controlsRef]); // Added camera and controlsRef to dependencies
   return null;
 }
 */
@@ -100,7 +103,12 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
   radius = 10,
   onNodeClick = () => {},
 }) => {
+  const [isMounted, setIsMounted] = useState(false);
   const controlsRef = useRef<OrbitControlsImpl>();
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const points = useMemo(() => generateSpherePoints(nodes.length, radius), [nodes, radius]);
 
@@ -130,29 +138,34 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
     if (startNode !== null && endNode !== null && points[startNode] && points[endNode] && nodes[startNode] && nodes[endNode]) {
       const p1 = points[startNode];
       const p2 = points[endNode];
+      
+      // Convert Point3D to THREE.Vector3 for slerp
       const p1Vec = new THREE.Vector3(p1.x, p1.y, p1.z);
       const p2Vec = new THREE.Vector3(p2.x, p2.y, p2.z);
       
       const arcForThree: THREE.Vector3[] = [];
       // Ensure angle is not NaN if p1 or p2 are zero vectors, or identical
       const angle = (p1Vec.lengthSq() > 0 && p2Vec.lengthSq() > 0) ? p1Vec.angleTo(p2Vec) : 0;
-      const steps = Math.max(2, Math.floor(angle * radius / 0.5)); 
+      const steps = Math.max(2, Math.floor(angle * radius / 0.5)); // Calculate steps based on angle and radius
 
       for (let t = 0; t <= steps; t++) {
         const f = t / steps;
         const pt = new THREE.Vector3().copy(p1Vec).slerp(p2Vec, f);
+        // Ensure normalization and scaling happens correctly
         if (pt.lengthSq() > 0) {
              arcForThree.push(pt.normalize().multiplyScalar(radius));
         } else { 
             // If slerp results in zero vector (e.g. opposite points), use lerp as fallback
+            // This case needs careful handling, potentially just pushing p1Vec or p2Vec scaled
             arcForThree.push(new THREE.Vector3().copy(p1Vec).lerp(p2Vec,f));
         }
       }
+      // Convert THREE.Vector3[] back to Point3D[] for state
       setPathPoints(arcForThree.map(v => ({ x: v.x, y: v.y, z: v.z })));
     } else {
       setPathPoints([]); 
     }
-  }, [startNode, endNode, points, radius, nodes]);
+  }, [startNode, endNode, points, radius, nodes]); // nodes dependency for safety if node data influences path
 
 
   interface NodeMeshProps {
@@ -178,21 +191,21 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
           <meshStandardMaterial color={color} roughness={0.5} metalness={0.1}/>
         </mesh>
         <DreiText
-            position={[0, 0.5, 0]}
+            position={[0, 0.5, 0]} // Position text above the sphere
             fontSize={0.2}
             color="white"
             anchorX="center"
             anchorY="middle"
-            outlineWidth={0.01}
+            outlineWidth={0.01} // Optional: adds a thin outline for better readability
             outlineColor="#333333"
           >
           {data.title || data.id}
         </DreiText>
         {data.url && data.type === 'image' && (
-           <mesh position={[0, 0, 0.4]} rotation={[0, Math.PI, 0]}>        
-            <planeGeometry args={[0.5, 0.5]} />
-            <meshBasicMaterial transparent side={THREE.DoubleSide}>
-                <Suspense fallback={null}>
+           <mesh position={[0, 0, 0.4]} rotation={[0, Math.PI, 0]}> {/* Position image slightly in front, rotate to face camera */}        
+            <planeGeometry args={[0.5, 0.5]} /> {/* Adjust size as needed */}
+            <meshBasicMaterial transparent side={THREE.DoubleSide}> {/* Ensure transparency and double-sided rendering */}
+                <Suspense fallback={null}> {/* Suspense for async texture loading */}
                     <TextureLoaderHelper url={data.url} />
                 </Suspense>
             </meshBasicMaterial>
@@ -201,6 +214,15 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
       </group>
     );
   };
+
+  if (!isMounted) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-muted/20 rounded-lg shadow-inner">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Initializing Renderer...</p>
+      </div>
+    );
+  }
 
   return (
     <Canvas 
@@ -228,10 +250,10 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
       
       {/* <PivotEffect selectedNode={selectedNode} points={points} radius={radius} controlsRef={controlsRef} /> */}
 
-      <Suspense fallback={null}>
+      <Suspense fallback={null}> {/* General suspense for all nodes if needed, or can be per-node */}
         {nodes.map((node, i) => points[i] && (
           <NodeMeshComponent
-            key={`${node.id}-${i}-${node.title || i}`}
+            key={`${node.id}-${i}-${node.title || i}`} // More robust key
             index={i}
             position={points[i]}
             data={node}
@@ -244,25 +266,30 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
       </Suspense>
 
       {displayedLinks.map(([a, b], idx) => {
-        if (!points[a] || !points[b]) return null;
+        if (!points[a] || !points[b]) return null; // Ensure points exist
+        // Convert Point3D to [number, number, number][] for DreiLine
+        const linePoints: [THREE.Vector3Tuple, THREE.Vector3Tuple] = [
+            [points[a].x, points[a].y, points[a].z],
+            [points[b].x, points[b].y, points[b].z]
+        ];
         return (
           <DreiLine 
             key={`link-${idx}-${a}-${b}`}
-            points={[[points[a].x, points[a].y, points[a].z], [points[b].x, points[b].y, points[b].z]]}
+            points={linePoints}
             lineWidth={1}
             color={
               matches.has(a) || matches.has(b)
                 ? 'hsl(var(--accent))'
                 : 'hsl(var(--primary))' 
             }
-            dashed={false}
+            dashed={false} // Links are not dashed by default
           />
         );
       })}
 
       {pathPoints.length > 1 && (
         <DreiLine 
-            points={pathPoints.map(p => [p.x, p.y, p.z])} 
+            points={pathPoints.map(p => [p.x, p.y, p.z] as THREE.Vector3Tuple)} // Convert Point3D[] to Vector3Tuple[]
             lineWidth={2.5} color="yellow" dashed={true} dashSize={0.2} gapSize={0.1} />
       )}
     </Canvas>
