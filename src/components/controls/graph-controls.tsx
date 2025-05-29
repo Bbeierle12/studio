@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import FileUploadButton from './file-upload-button';
 import { Button } from '@/components/ui/button';
-import { Search, FileJson, FileText, Trash2, UploadCloud } from 'lucide-react';
+import { Search, Trash2, FileUp } from 'lucide-react';
+import { useToast } from "@/hooks/use-toast";
 
 interface GraphControlsProps {
   searchTerm: string;
@@ -23,6 +24,22 @@ const GraphControls: React.FC<GraphControlsProps> = ({
   onPdfUpload,
   onClearMap,
 }) => {
+  const { toast } = useToast();
+
+  const handleFileSelect = (file: File) => {
+    if (file.name.endsWith('.json') || file.type === 'application/json') {
+      onJsonUpload(file);
+    } else if (file.name.endsWith('.pdf') || file.type === 'application/pdf') {
+      onPdfUpload(file);
+    } else {
+      toast({
+        title: "Unsupported File Type",
+        description: `Please upload a .json or .pdf file. You uploaded: ${file.name}`,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <Card className="w-full max-w-md shadow-xl">
       <CardHeader>
@@ -41,33 +58,15 @@ const GraphControls: React.FC<GraphControlsProps> = ({
           />
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <FileUploadButton
-            onFileSelect={onJsonUpload}
-            accept=".json"
-            variant="outline"
-            icon={<FileJson className="h-5 w-5" />}
-          >
-            Upload JSON
-          </FileUploadButton>
-          <FileUploadButton
-            onFileSelect={onPdfUpload}
-            accept=".pdf"
-            variant="outline"
-            icon={<FileText className="h-5 w-5" />}
-          >
-            Upload PDF
-          </FileUploadButton>
-          <FileUploadButton
-            onFileSelect={onPdfUpload} // Reusing PDF upload logic for now
-            accept=".pdf" // Assuming PDFs from Drive for now
-            variant="outline"
-            icon={<UploadCloud className="h-5 w-5" />}
-            className="sm:col-span-2" // Make it full width on sm screens if it's the third item
-          >
-            Upload from Drive
-          </FileUploadButton>
-        </div>
+        <FileUploadButton
+          onFileSelect={handleFileSelect}
+          accept=".json,.pdf"
+          variant="outline"
+          icon={<FileUp className="h-5 w-5" />}
+          className="w-full"
+        >
+          Upload File (.json, .pdf)
+        </FileUploadButton>
         
         <Button
           onClick={onClearMap}
