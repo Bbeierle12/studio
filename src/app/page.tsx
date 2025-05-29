@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -40,19 +41,18 @@ export default function Home() {
   
   useEffect(() => {
     setNodes(prevNodes => updateNodePositions(prevNodes));
-  }, [links.length]); // Re-calculate positions when structure might change due to links (or nodes, handled separately)
+  }, [links.length, updateNodePositions]); // Re-calculate positions when structure might change
 
 
   const handleJsonUpload = async (file: File) => {
     try {
       const fileContent = await file.text();
-      const graphData = JSON.parse(fileContent) as GraphData; // Add more robust validation later
+      const graphData = JSON.parse(fileContent) as GraphData; 
 
       if (!graphData.nodes || !graphData.links) {
         throw new Error("Invalid JSON format: 'nodes' and 'links' arrays are required.");
       }
       
-      // Ensure no duplicate IDs with existing nodes or central PDF node
       const existingIds = new Set(nodes.map(n => n.id));
       const newNodes = graphData.nodes.filter(n => !existingIds.has(n.id) && n.id !== CENTRAL_PDF_NODE_ID);
       const newLinks = graphData.links.filter(l => {
@@ -79,7 +79,7 @@ export default function Home() {
         id: pdfNodeId,
         title: file.name,
         type: 'pdf',
-        content: pdfDataUri, // Store data URI for AI processing
+        content: pdfDataUri, 
       };
 
       const linkToCentral: LinkData = {
@@ -88,29 +88,28 @@ export default function Home() {
         target: pdfNodeId,
       };
       
-      const updatedNodes = updateNodePositions([...nodes, pdfNode]);
-      setNodes(updatedNodes);
+      const updatedNodesWithPdf = updateNodePositions([...nodes, pdfNode]);
+      setNodes(updatedNodesWithPdf);
       setLinks(prevLinks => [...prevLinks, linkToCentral]);
 
       toast({ title: "PDF uploaded", description: `Node "${file.name}" added. Generating AI links...` });
 
-      // AI Link Generation
       const aiInput: GenerateLinksForPdfInput = {
         pdfDataUri,
-        existingNodeTitles: updatedNodes.filter(n => n.id !== pdfNodeId).map(n => n.title),
+        existingNodeTitles: updatedNodesWithPdf.filter(n => n.id !== pdfNodeId && n.id !== CENTRAL_PDF_NODE_ID).map(n => n.title),
       };
       
       if (aiInput.existingNodeTitles.length > 0) {
         const aiResult = await generateLinksForPdf(aiInput);
         const aiLinks: LinkData[] = aiResult.suggestedLinks.map(suggestedLink => {
-          const targetNode = updatedNodes.find(n => n.title === suggestedLink.targetNodeTitle);
+          const targetNode = updatedNodesWithPdf.find(n => n.title === suggestedLink.targetNodeTitle);
           if (targetNode) {
             return {
               id: `${pdfNodeId}-${targetNode.id}`,
               source: pdfNodeId,
               target: targetNode.id,
               reason: suggestedLink.reason,
-              color: '#2ecc71' // Green for AI suggested links
+              color: '#2ecc71' 
             };
           }
           return null;
@@ -123,7 +122,7 @@ export default function Home() {
           toast({ title: "AI Links", description: `No new links suggested by AI for "${file.name}".` });
         }
       } else {
-         toast({ title: "AI Links Skipped", description: "No existing nodes to link the PDF to." });
+         toast({ title: "AI Links Skipped", description: "No other existing nodes to link the PDF to (besides the central anchor)." });
       }
 
     } catch (error) {
@@ -132,6 +131,15 @@ export default function Home() {
     } finally {
       setIsLoadingAI(false);
     }
+  };
+
+  const handleClearMap = () => {
+    setNodes([initialPdfAnchorNode]);
+    setLinks([]);
+    setSearchTerm('');
+    setHighlightedNodeIds(new Set());
+    setHighlightedLinkIds(new Set());
+    toast({ title: "Map Cleared", description: "The knowledge map has been reset." });
   };
   
   useEffect(() => {
@@ -153,7 +161,6 @@ export default function Home() {
     links.forEach(link => {
       if (newHighlightedNodeIds.has(link.source) || newHighlightedNodeIds.has(link.target)) {
         newHighlightedLinkIds.add(link.id);
-        // Also highlight connected nodes if not already highlighted by title match
         if (newHighlightedNodeIds.has(link.source) && !newHighlightedNodeIds.has(link.target)) {
           newHighlightedNodeIds.add(link.target);
         }
@@ -179,6 +186,7 @@ export default function Home() {
             onSearchTermChange={setSearchTerm}
             onJsonUpload={handleJsonUpload}
             onPdfUpload={handlePdfUpload}
+            onClearMap={handleClearMap}
           />
           {isLoadingAI && (
             <div className="mt-4 p-4 bg-card rounded-md flex items-center justify-center text-sm">

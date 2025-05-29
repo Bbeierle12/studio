@@ -1,16 +1,19 @@
+
 'use client';
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import FileUploadButton from './file-upload-button';
-import { Search, UploadCloud, FileJson, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Search, FileJson, FileText, Trash2 } from 'lucide-react';
 
 interface GraphControlsProps {
   searchTerm: string;
   onSearchTermChange: (term: string) => void;
   onJsonUpload: (file: File) => void;
   onPdfUpload: (file: File) => void;
+  onClearMap: () => void;
 }
 
 const GraphControls: React.FC<GraphControlsProps> = ({
@@ -18,6 +21,7 @@ const GraphControls: React.FC<GraphControlsProps> = ({
   onSearchTermChange,
   onJsonUpload,
   onPdfUpload,
+  onClearMap,
 }) => {
   return (
     <Card className="w-full max-w-md shadow-xl">
@@ -55,6 +59,16 @@ const GraphControls: React.FC<GraphControlsProps> = ({
             Upload PDF
           </FileUploadButton>
         </div>
+        
+        <Button
+          onClick={onClearMap}
+          variant="destructive"
+          className="w-full"
+          aria-label="Clear map"
+        >
+          <Trash2 className="mr-2 h-5 w-5" />
+          Clear Map
+        </Button>
       </CardContent>
     </Card>
   );
