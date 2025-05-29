@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect, Suspense } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Text as DreiText, Line as DreiLine } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,6 @@ import * as XLSX from 'xlsx';
 import yaml from 'js-yaml';
 import JSZip from 'jszip';
 import * as THREE from 'three';
-import { useToast } from "@/hooks/use-toast";
 import { Loader2, XCircle, UploadCloud, SearchIcon } from 'lucide-react';
 import AppHeader from '@/components/layout/app-header';
 
@@ -26,52 +25,60 @@ interface Node {
   title?: string;
 }
 
-type Vec3 = THREE.Vector3;
+// Simple 3D point interface
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
 
 // Utility: Fibonacci sphere distribution for node placement
-function generateSpherePoints(count: number, radius: number): Vec3[] {
-  const points: Vec3[] = [];
+function generateSpherePoints(count: number, radius: number): Point3D[] {
+  const points: Point3D[] = [];
   if (count === 0) return points;
   const phi = Math.PI * (3 - Math.sqrt(5)); // golden angle in radians
   for (let i = 0; i < count; i++) {
-    const y = count === 1 ? 0 : 1 - (i / (count - 1)) * 2;
+    const y = count === 1 ? 0 : 1 - (i / (Math.max(1, count - 1))) * 2; // Avoid division by zero if count is 1
     const r = Math.sqrt(1 - y * y);
     const theta = phi * i;
     const x = Math.cos(theta) * r;
     const z = Math.sin(theta) * r;
-    points.push(new THREE.Vector3(x * radius, y * radius, z * radius));
+    points.push({ x: x * radius, y: y * radius, z: z * radius });
   }
   return points;
 }
 
-// Pivot effect component to reorient camera and controls
+// Pivot effect component (Temporarily removed for diagnostics)
+/*
 type PivotProps = {
   selectedNode: number | null;
-  points: Vec3[];
+  points: Point3D[];
   radius: number;
   controlsRef: React.RefObject<OrbitControlsImpl | undefined>;
 };
 function PivotEffect({ selectedNode, points, radius, controlsRef }: PivotProps) {
   const { camera } = useThree();
   useEffect(() => {
-    if (selectedNode !== null && controlsRef.current && points[selectedNode]) {
-      const targetPoint = points[selectedNode].clone();
+    const controls = controlsRef.current;
+    if (selectedNode !== null && controls && points[selectedNode]) {
+      const targetPoint = new THREE.Vector3(points[selectedNode].x, points[selectedNode].y, points[selectedNode].z);
       const distance = radius * 2.5;
       
       const newCameraPosition = new THREE.Vector3();
-      if (targetPoint.lengthSq() === 0) {
+      if (targetPoint.lengthSq() === 0) { 
         newCameraPosition.set(0, 0, distance);
       } else {
         newCameraPosition.copy(targetPoint).normalize().multiplyScalar(distance);
       }
 
       camera.position.lerp(newCameraPosition, 0.1);
-      controlsRef.current.target.lerp(targetPoint, 0.1);
-      controlsRef.current.update();
+      controls.target.lerp(targetPoint, 0.1);
+      controls.update();
     }
   }, [selectedNode, points, radius, camera, controlsRef]);
   return null;
 }
+*/
 
 // Helper component to load texture for image nodes
 function TextureLoaderHelper({ url }: { url: string }) {
@@ -84,7 +91,7 @@ export default function KnowledgeMap3D() {
   const [isClientMounted, setIsClientMounted] = useState(false);
   const [search, setSearch] = useState<string>('');
   const [nodes, setNodes] = useState<Node[]>(
-    Array.from({ length: 10 }, (_, i) => ({ id: `Node ${i + 1}`, title: `Node ${i + 1}` }))
+    Array.from({ length: 10 }, (_, i) => ({ id: `Node ${i + 1}`, title: `Node ${i + 1}`, type: 'default' }))
   );
   const [links, setLinks] = useState<[number, number][]>(() => {
     const initialLinks: [number, number][] = [];
@@ -104,13 +111,12 @@ export default function KnowledgeMap3D() {
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
   const [startNode, setStartNode] = useState<number | null>(null);
   const [endNode, setEndNode] = useState<number | null>(null);
-  const [pathPoints, setPathPoints] = useState<Vec3[]>([]);
+  const [pathPoints, setPathPoints] = useState<Point3D[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const radius = 10;
   const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
   const controlsRef = useRef<OrbitControlsImpl>();
-  const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -130,7 +136,8 @@ export default function KnowledgeMap3D() {
       const fileLinks: [number, number][] = [];
       
       if (file.size > MAX_FILE_SIZE) {
-        toast({ title: "File Error", description: `File too large: ${file.name}. Max ${(MAX_FILE_SIZE / (1024 * 1024)).toFixed(1)} MB.`, variant: "destructive" });
+        console.error(`File too large: ${file.name}. Max ${(MAX_FILE_SIZE / (1024 * 1024)).toFixed(1)} MB.`);
+        alert(`File too large: ${file.name}. Max ${(MAX_FILE_SIZE / (1024 * 1024)).toFixed(1)} MB.`);
         return {nodes: [], links: []};
       }
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -143,7 +150,7 @@ export default function KnowledgeMap3D() {
           if (Array.isArray(data.nodes)) {
              data.nodes.forEach((n: any) => fileNodes.push({ id: n.id || `jsonNode-${Date.now()}`, title: n.title || n.id || 'JSON Node', data: n.data, type: 'json'}));
           }
-          toast({ title: "File Processed", description: `${file.name} (JSON) parsed.` });
+          console.log(`${file.name} (JSON) parsed.`);
         }
         else if (['yaml', 'yml'].includes(ext)) {
           const text = await file.text();
@@ -151,7 +158,7 @@ export default function KnowledgeMap3D() {
           if (Array.isArray(data.nodes)) {
             data.nodes.forEach((n: any) => fileNodes.push({ id: n.id || `yamlNode-${Date.now()}`, title: n.title || n.id || 'YAML Node', data: n.data, type: 'yaml'}));
           }
-          toast({ title: "File Processed", description: `${file.name} (YAML) parsed.` });
+          console.log(`${file.name} (YAML) parsed.`);
         }
         else if (file.type === 'text/csv' || ext === 'csv') {
           const text = await file.text();
@@ -165,7 +172,7 @@ export default function KnowledgeMap3D() {
                   fileNodes.push({ id: nid, title: row.title || nid, data: row, type: 'csv' });
                 });
                 resolve();
-                toast({ title: "File Processed", description: `${file.name} (CSV) parsed.` });
+                console.log(`${file.name} (CSV) parsed.`);
               },
               error: (err) => reject(err),
             });
@@ -180,7 +187,7 @@ export default function KnowledgeMap3D() {
              const nid = row.id || `SheetRow${i+1}-${Date.now()}`;
              fileNodes.push({ id: nid, title: row.title || nid, data: row, type: 'excel' });
           });
-          toast({ title: "File Processed", description: `${file.name} (Excel) parsed.` });
+          console.log(`${file.name} (Excel) parsed.`);
         }
         else if (file.type.includes('xml') || ext === 'xml') {
           const text = await file.text();
@@ -195,7 +202,7 @@ export default function KnowledgeMap3D() {
             }
             fileNodes.push({ id: nid, title: el.getAttribute('title') || nid, data: {textContent: el.textContent, attributes: nodeData}, type: 'xml' });
           });
-          toast({ title: "File Processed", description: `${file.name} (XML) parsed.` });
+          console.log(`${file.name} (XML) parsed.`);
         }
         else if (file.type === 'application/pdf') {
           const url = URL.createObjectURL(file);
@@ -203,13 +210,13 @@ export default function KnowledgeMap3D() {
           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
             fileLinks.push([newNodeBaseIdx, 0]); 
           }
-          toast({ title: "File Processed", description: `${file.name} (PDF) added.` });
+          console.log(`${file.name} (PDF) added.`);
         }
         else if (file.type === 'text/plain' || ['md','txt'].includes(ext)) {
           const text = await file.text();
           const lines = text.split(/\r?\n/).filter((l) => l.trim());
           lines.forEach((l, i) => fileNodes.push({id: `textLine-${i}-${Date.now()}`, title: l.substring(0,30) + (l.length > 30 ? '...' : ''), data: {content: l}, type: 'text'}));
-          toast({ title: "File Processed", description: `${file.name} (Text) parsed.` });
+          console.log(`${file.name} (Text) parsed.`);
         }
         else if (file.type.startsWith('image/')) {
           const url = URL.createObjectURL(file);
@@ -217,7 +224,7 @@ export default function KnowledgeMap3D() {
            if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
             fileLinks.push([newNodeBaseIdx, 0]);
           }
-          toast({ title: "File Processed", description: `${file.name} (Image) added.` });
+          console.log(`${file.name} (Image) added.`);
         }
         else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
           const url = URL.createObjectURL(file);
@@ -225,7 +232,7 @@ export default function KnowledgeMap3D() {
            if (nodes.length + newNodesBatch.length + fileNodes.length > 1) {
             fileLinks.push([newNodeBaseIdx, 0]);
           }
-          toast({ title: "File Processed", description: `${file.name} (Media) added.` });
+          console.log(`${file.name} (Media) added.`);
         }
         else if (ext === 'zip') {
           const data = await file.arrayBuffer();
@@ -250,14 +257,15 @@ export default function KnowledgeMap3D() {
             fileNodes.push(...r.nodes);
             fileLinks.push(...r.links);
           });
-          toast({ title: "File Processed", description: `${file.name} (ZIP) extracted and processed.` });
+          console.log(`${file.name} (ZIP) extracted and processed.`);
         }
         else {
-          toast({ title: "Unsupported File", description: `Unsupported file type: ${file.name}`, variant: "destructive" });
+          console.error(`Unsupported file type: ${file.name}`);
+          alert(`Unsupported file type: ${file.name}`);
         }
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error);
-        toast({ title: "Processing Error", description: `Could not process ${file.name}: ${(error as Error).message}`, variant: "destructive" });
+        alert(`Could not process ${file.name}: ${(error as Error).message}`);
       }
       return { nodes: fileNodes, links: fileLinks };
     };
@@ -299,33 +307,35 @@ export default function KnowledgeMap3D() {
   };
 
   const clearMap = () => {
-    setNodes( Array.from({ length: 1 }, (_, i) => ({ id: `Node ${i + 1}`, title: `Node ${i + 1}` })));
+    setNodes( Array.from({ length: 1 }, (_, i) => ({ id: `Node ${i + 1}`, title: `Node ${i + 1}`, type: 'default' })));
     setLinks([]);
     setSelectedNode(null);
     setStartNode(null);
     setEndNode(null);
     setPathPoints([]);
     setSearch('');
-    toast({ title: "Map Cleared", description: "The knowledge map has been reset." });
+    console.log("Map Cleared: The knowledge map has been reset.");
+    alert("Map Cleared: The knowledge map has been reset.");
   };
 
   useEffect(() => {
     if (startNode !== null && endNode !== null && points[startNode] && points[endNode]) {
-      const p1 = points[startNode].clone();
-      const p2 = points[endNode].clone();
-      const arc: Vec3[] = [];
-      const steps = Math.max(2, Math.floor(p1.angleTo(p2) * radius / 0.5)); 
+      const p1Vec = new THREE.Vector3(points[startNode].x, points[startNode].y, points[startNode].z);
+      const p2Vec = new THREE.Vector3(points[endNode].x, points[endNode].y, points[endNode].z);
+      
+      const arcForThree: THREE.Vector3[] = [];
+      const steps = Math.max(2, Math.floor(p1Vec.angleTo(p2Vec) * radius / 0.5)); 
 
       for (let t = 0; t <= steps; t++) {
         const f = t / steps;
-        const pt = new THREE.Vector3().copy(p1).slerp(p2, f);
+        const pt = new THREE.Vector3().copy(p1Vec).slerp(p2Vec, f);
         if (pt.lengthSq() > 0) {
-             arc.push(pt.normalize().multiplyScalar(radius));
+             arcForThree.push(pt.normalize().multiplyScalar(radius));
         } else { 
-            arc.push(new THREE.Vector3().copy(p1).lerp(p2,f));
+            arcForThree.push(new THREE.Vector3().copy(p1Vec).lerp(p2Vec,f));
         }
       }
-      setPathPoints(arc);
+      setPathPoints(arcForThree.map(v => ({ x: v.x, y: v.y, z: v.z })));
     }
   }, [startNode, endNode, points, radius]);
 
@@ -349,15 +359,24 @@ export default function KnowledgeMap3D() {
     return validLinks.filter(([a, b]) => matches.has(a) || matches.has(b));
   }, [search, matches, links, nodes.length]);
 
+  interface NodeMeshProps {
+    position: Point3D;
+    data: Node;
+    highlight: boolean;
+    index: number;
+    isStart?: boolean;
+    isEnd?: boolean;
+    onClick: (index: number) => void;
+  }
 
-  const NodeMesh = ({ position, data, highlight, index, isStart, isEnd }: {position: Vec3, data: Node, highlight: boolean, index: number, isStart?: boolean, isEnd?: boolean}) => {
+  const NodeMesh = ({ position, data, highlight, index, isStart, isEnd, onClick: handleNodeClickProp }: NodeMeshProps) => {
     let color = 'hsl(var(--primary))';
     if (isStart) color = 'lime';
     else if (isEnd) color = 'orange';
     else if (highlight) color = 'hsl(var(--accent))';
 
     return (
-      <group position={position} onClick={(e) => { e.stopPropagation(); handleNodeClick(index);}}>
+      <group position={[position.x, position.y, position.z]} onClick={(e) => { e.stopPropagation(); handleNodeClickProp(index);}}>
         <mesh>
           <sphereGeometry args={[0.3, 16, 16]} />
           <meshStandardMaterial color={color} roughness={0.5} metalness={0.1}/>
@@ -485,18 +504,21 @@ export default function KnowledgeMap3D() {
               
               <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} />
               
+              {/* Temporarily removed for diagnostics 
               {points.length > 0 && <PivotEffect selectedNode={selectedNode} points={points} radius={radius} controlsRef={controlsRef} />}
+              */}
 
               <Suspense fallback={null}>
                 {nodes.map((node, i) => points[i] && (
                   <NodeMesh
-                    key={`${node.id}-${i}-${node.title}`}
+                    key={`${node.id}-${i}-${node.title || i}`}
                     index={i}
                     position={points[i]}
                     data={node}
                     highlight={matches.has(i)}
                     isStart={i === startNode}
                     isEnd={i === endNode}
+                    onClick={handleNodeClick}
                   />
                 ))}
               </Suspense>
@@ -506,7 +528,7 @@ export default function KnowledgeMap3D() {
                 return (
                   <DreiLine 
                     key={`link-${idx}-${a}-${b}`}
-                    points={[points[a], points[b]]}
+                    points={[[points[a].x, points[a].y, points[a].z], [points[b].x, points[b].y, points[b].z]]}
                     lineWidth={1}
                     color={
                       matches.has(a) || matches.has(b)
@@ -519,7 +541,9 @@ export default function KnowledgeMap3D() {
               })}
 
               {pathPoints.length > 1 && (
-                <DreiLine points={pathPoints} lineWidth={2.5} color="yellow" dashed={true} dashSize={0.2} gapSize={0.1} />
+                <DreiLine 
+                    points={pathPoints.map(p => [p.x, p.y, p.z])} 
+                    lineWidth={2.5} color="yellow" dashed={true} dashSize={0.2} gapSize={0.1} />
               )}
             </Canvas>
           )}
@@ -533,3 +557,5 @@ export default function KnowledgeMap3D() {
     </div>
   );
 }
+
+    
