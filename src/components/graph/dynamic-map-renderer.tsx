@@ -139,8 +139,8 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
 
   useEffect(() => {
     if (startNode !== null && endNode !== null && points[startNode] && points[endNode] && nodes[startNode] && nodes[endNode]) {
-      const p1 = points[startNode];
-      const p2 = points[endNode];
+      const p1 = points[startNode]; // Point3D
+      const p2 = points[endNode]; // Point3D
       
       // Convert Point3D to THREE.Vector3 for slerp
       const p1Vec = new THREE.Vector3(p1.x, p1.y, p1.z);
@@ -153,14 +153,21 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
 
       for (let t = 0; t <= steps; t++) {
         const f = t / steps;
-        const pt = new THREE.Vector3().copy(p1Vec).slerp(p2Vec, f);
+        
+        const currentArcVec = new THREE.Vector3();
+        currentArcVec.copy(p1Vec);
+        currentArcVec.slerp(p2Vec, f); // slerp modifies currentArcVec and normalizes it
+
         // Ensure normalization and scaling happens correctly
-        if (pt.lengthSq() > 0) {
-             arcForThree.push(pt.normalize().multiplyScalar(radius));
+        if (currentArcVec.lengthSq() > 0) { // Check if slerp resulted in a non-zero vector
+             // slerp already normalizes, so just scale
+             arcForThree.push(currentArcVec.multiplyScalar(radius)); // currentArcVec is modified and then pushed
         } else { 
             // If slerp results in zero vector (e.g. opposite points), use lerp as fallback
-            // This case needs careful handling, potentially just pushing p1Vec or p2Vec scaled
-            arcForThree.push(new THREE.Vector3().copy(p1Vec).lerp(p2Vec,f));
+            const fallbackPt = new THREE.Vector3();
+            fallbackPt.copy(p1Vec);
+            fallbackPt.lerp(p2Vec,f); // lerp does not normalize
+            arcForThree.push(fallbackPt.normalize().multiplyScalar(radius));
         }
       }
       // Convert THREE.Vector3[] back to Point3D[] for state
