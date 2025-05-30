@@ -1,8 +1,10 @@
 
 'use client';
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import * as THREE from 'three';
 
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,16 +13,25 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import yaml from 'js-yaml';
 import JSZip from 'jszip';
-import { Loader2, XCircle, UploadCloud, SearchIcon } from 'lucide-react';
+import { Loader2, XCircle, UploadCloud, Search as SearchIcon, Brain } from 'lucide-react'; // Added Brain for AI Search
 import AppHeader from '@/components/layout/app-header';
 
-// Node type (can be moved to a shared types file if used elsewhere)
+import { searchKnowledgeMap, type SearchKnowledgeMapInput } from '@/ai/flows/search-knowledge-map-flow';
+
+// Node type
 interface Node {
   id: string;
   type?: string;
   url?: string;
   data?: any;
   title?: string;
+}
+
+// Point3D interface (used by DynamicMapRenderer)
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
 }
 
 const DynamicMapRenderer = dynamic(() => import('@/components/graph/dynamic-map-renderer'), {
@@ -36,7 +47,10 @@ const DynamicMapRenderer = dynamic(() => import('@/components/graph/dynamic-map-
 
 export default function KnowledgeMap3D() {
   const [isClientMounted, setIsClientMounted] = useState(false);
-  const [search, setSearch] = useState<string>('');
+  const [searchText, setSearchText] = useState<string>('');
+  const [highlightedIndices, setHighlightedIndices] = useState<Set<number>>(new Set());
+  const [isAiSearching, setIsAiSearching] = useState<boolean>(false);
+
   const [nodes, setNodes] = useState<Node[]>(
     Array.from({ length: 10 }, (_, i) => ({ id: `Node ${i + 1}`, title: `Node ${i + 1}`, type: 'default' }))
   );
@@ -58,21 +72,61 @@ export default function KnowledgeMap3D() {
   const [selectedNode, setSelectedNode] = useState<number | null>(null);
   const [startNode, setStartNode] = useState<number | null>(null);
   const [endNode, setEndNode] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
 
-  const radius = 10; // This can be a prop for DynamicMapRenderer if needed
-  const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
+  const radius = 10;
+  const MAX_FILE_SIZE = 15 * 1024 * 1024;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setIsClientMounted(true);
   }, []);
 
+  const handleAiSearch = async () => {
+    if (!searchText.trim() || nodes.length === 0) {
+      setHighlightedIndices(new Set()); // Clear highlights if search is empty or no nodes
+      return;
+    }
+    setIsAiSearching(true);
+    setHighlightedIndices(new Set()); // Clear previous highlights
+
+    try {
+      const nodesForAi: SearchKnowledgeMapInput['nodes'] = nodes.map(node => ({
+        id: node.id,
+        title: node.title || node.id, // Ensure title is present
+      }));
+
+      const result = await searchKnowledgeMap({ searchQuery: searchText, nodes: nodesForAi });
+      
+      const newMatches = new Set<number>();
+      if (result.relevantNodeIds && result.relevantNodeIds.length > 0) {
+        result.relevantNodeIds.forEach(id => {
+          const index = nodes.findIndex(node => node.id === id);
+          if (index !== -1) {
+            newMatches.add(index);
+          }
+        });
+      }
+      setHighlightedIndices(newMatches);
+      if (newMatches.size === 0) {
+        alert("AI Search: No specifically relevant nodes found for your query.");
+      }
+
+    } catch (error) {
+      console.error("AI Search Error:", error);
+      alert("An error occurred during AI search. Please check the console.");
+      setHighlightedIndices(new Set()); // Clear highlights on error
+    } finally {
+      setIsAiSearching(false);
+    }
+  };
+
+
   const handleFileUpload = async (eventOrFiles: React.ChangeEvent<HTMLInputElement> | File[]) => {
     const files = Array.isArray(eventOrFiles) ? eventOrFiles : Array.from(eventOrFiles.target.files || []);
     if (files.length === 0) return;
     
-    setIsLoading(true);
+    setIsLoadingFiles(true);
     const newNodesBatch: Node[] = [];
     const newLinksBatch: [number, number][] = [];
 
@@ -152,7 +206,7 @@ export default function KnowledgeMap3D() {
         else if (file.type === 'application/pdf') {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: 'pdf', url });
-          if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node if others exist
+          if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { 
             fileLinks.push([newNodeBaseIdx, 0]); 
           }
           console.log(`${file.name} (PDF) added.`);
@@ -166,7 +220,7 @@ export default function KnowledgeMap3D() {
         else if (file.type.startsWith('image/')) {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: 'image', url });
-           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node
+           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { 
             fileLinks.push([newNodeBaseIdx, 0]);
           }
           console.log(`${file.name} (Image) added.`);
@@ -174,7 +228,7 @@ export default function KnowledgeMap3D() {
         else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
           const url = URL.createObjectURL(file);
           fileNodes.push({ id: file.name, title: file.name, type: ext, url });
-           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { // Link to first node
+           if (nodes.length + newNodesBatch.length + fileNodes.length > 1) { 
             fileLinks.push([newNodeBaseIdx, 0]);
           }
           console.log(`${file.name} (Media) added.`);
@@ -183,16 +237,14 @@ export default function KnowledgeMap3D() {
           const data = await file.arrayBuffer();
           const zip = await JSZip.loadAsync(data);
           const zipFilePromises: Promise<{nodes: Node[], links: [number,number][]}>[] = [];
-          let nestedBaseIndex = newNodeBaseIdx + fileNodes.length; // Keep track of index for nested files
+          let nestedBaseIndex = newNodeBaseIdx + fileNodes.length; 
           for (const entryName of Object.keys(zip.files)) {
             const entry = zip.files[entryName];
             if (!entry.dir) {
               zipFilePromises.push(
                 entry.async('blob').then(async blob => {
                   const zippedFile = new File([blob], entryName, { type: blob.type });
-                  // Pass the current base index for nested processing
                   const result = await processFile(zippedFile, nestedBaseIndex);
-                  // Update base index for the next nested file based on nodes added by current one
                   nestedBaseIndex += result.nodes.length; 
                   return result;
                 })
@@ -217,7 +269,7 @@ export default function KnowledgeMap3D() {
       return { nodes: fileNodes, links: fileLinks };
     };
 
-    let currentTotalNodes = nodes.length; // Base index for new nodes from current batch of files
+    let currentTotalNodes = nodes.length;
     for (const file of files) {
       const result = await processFile(file, currentTotalNodes + newNodesBatch.length);
       newNodesBatch.push(...result.nodes);
@@ -230,15 +282,12 @@ export default function KnowledgeMap3D() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-    setIsLoading(false);
+    setIsLoadingFiles(false);
   };
 
   const handleNodeClick = (i: number) => {
     if (i === -1) { 
       setSelectedNode(null);
-      // Optionally, also clear path selection if a click outside deselects nodes.
-      // setStartNode(null);
-      // setEndNode(null);
       return;
     }
     setSelectedNode(i);
@@ -261,7 +310,8 @@ export default function KnowledgeMap3D() {
     setSelectedNode(null);
     setStartNode(null);
     setEndNode(null);
-    setSearch('');
+    setSearchText('');
+    setHighlightedIndices(new Set());
     console.log("Map Cleared: The knowledge map has been reset.");
     alert("Map Cleared: The knowledge map has been reset.");
   };
@@ -275,19 +325,26 @@ export default function KnowledgeMap3D() {
             <CardTitle className="text-xl text-center">Controls</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="relative">
-              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search nodes..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-10"
-                aria-label="Search nodes"
-              />
+            <div className="flex items-center space-x-2">
+              <div className="relative flex-grow">
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="AI Search query..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className="w-full pl-10"
+                  aria-label="AI Search query"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAiSearch(); }}
+                />
+              </div>
+              <Button onClick={handleAiSearch} disabled={isAiSearching || !searchText.trim()} aria-label="Perform AI Search">
+                {isAiSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+              </Button>
             </div>
+
             <div className="relative">
-              <Button onClick={() => fileInputRef.current?.click()} className="w-full" disabled={isLoading}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
+              <Button onClick={() => fileInputRef.current?.click()} className="w-full" disabled={isLoadingFiles}>
+                {isLoadingFiles ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UploadCloud className="mr-2 h-4 w-4" />}
                 Upload Files
               </Button>
               <input
@@ -297,7 +354,7 @@ export default function KnowledgeMap3D() {
                 accept=".json,.pdf,.xml,.csv,.txt,.md,.yaml,.yml,.xls,.xlsx,.zip,image/*,audio/*,video/*"
                 multiple
                 onChange={handleFileUpload}
-                disabled={isLoading}
+                disabled={isLoadingFiles}
               />
             </div>
              { (startNode !== null || endNode !==null) && 
@@ -349,7 +406,7 @@ export default function KnowledgeMap3D() {
             <DynamicMapRenderer
               nodes={nodes}
               links={links}
-              search={search}
+              highlightedIndices={highlightedIndices}
               selectedNode={selectedNode}
               startNode={startNode}
               endNode={endNode}
