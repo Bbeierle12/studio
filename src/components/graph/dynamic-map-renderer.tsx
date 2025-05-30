@@ -31,10 +31,10 @@ function generateSpherePoints(count: number, radius: number): Point3D[] {
   for (let i = 0; i < count; i++) {
     // y goes from 1 to -1, ensure (count - 1) is not 0 for single node
     const y = count === 1 ? 0 : 1 - (i / (Math.max(1, count - 1))) * 2;
-    const r = Math.sqrt(1 - y * y);
-    const theta = phi * i;
-    const x = Math.cos(theta) * r;
-    const z = Math.sin(theta) * r;
+    const r_sphere = Math.sqrt(1 - y * y);
+    const theta_sphere = phi * i;
+    const x = Math.cos(theta_sphere) * r_sphere;
+    const z = Math.sin(theta_sphere) * r_sphere;
     points.push({ x: x * radius, y: y * radius, z: z * radius });
   }
   return points;
@@ -138,70 +138,50 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
   const [pathPoints, setPathPoints] = React.useState<Point3D[]>([]);
 
   useEffect(() => {
-    if (startNode !== null && endNode !== null && points[startNode] && points[endNode] && nodes[startNode] && nodes[endNode]) {
+    if (startNode !== null && endNode !== null && points[startNode] && points[endNode]) {
       const p1 = points[startNode]; // Point3D
       const p2 = points[endNode]; // Point3D
 
-      // Convert Point3D to THREE.Vector3 for slerp
-      const p1Vec = new THREE.Vector3(p1.x, p1.y, p1.z);
-      const p2Vec = new THREE.Vector3(p2.x, p2.y, p2.z);
-
+      // Convert Point3D to local THREE.Vector3 instances for calculation
+      const p1Vec = new THREE.Vector3(p1.x, p1.y, p1.z).normalize();
+      const p2Vec = new THREE.Vector3(p2.x, p2.y, p2.z).normalize();
+      
       const arcForThree: Point3D[] = [];
-      // Ensure angle is not NaN if p1 or p2 are zero vectors, or identical
-      const angle = (p1Vec.lengthSq() > 0 && p2Vec.lengthSq() > 0) ? p1Vec.angleTo(p2Vec) : 0;
-      const steps = Math.max(2, Math.floor(angle * radius / 0.5)); // Calculate steps based on angle and radius
+      const dotProduct = p1Vec.dot(p2Vec);
+      const theta = Math.acos(THREE.MathUtils.clamp(dotProduct, -1, 1)); // Angle between vectors
+      const steps = Math.max(2, Math.floor(theta * radius / 0.5) || 32); // Number of segments in the arc
 
-      for (let t = 0; t <= steps; t++) {
-        const f = t / steps;
-
-        const currentArcVec = new THREE.Vector3();
-        currentArcVec.copy(p1Vec);
-        // Explicitly call slerp via prototype
-        if (typeof THREE.Vector3.prototype.slerp === 'function') {
-          THREE.Vector3.prototype.slerp.call(currentArcVec, p2Vec, f);
-        } else {
-          console.error("THREE.Vector3.prototype.slerp is not a function!");
-           // Fallback to lerp if slerp is missing
-          if (typeof THREE.Vector3.prototype.lerp === 'function') {
-            THREE.Vector3.prototype.lerp.call(currentArcVec, p2Vec, f);
-          } else {
-            console.error("THREE.Vector3.prototype.lerp is also not a function!");
-            // As a last resort, manual lerp
-            currentArcVec.x = p1Vec.x + (p2Vec.x - p1Vec.x) * f;
-            currentArcVec.y = p1Vec.y + (p2Vec.y - p1Vec.y) * f;
-            currentArcVec.z = p1Vec.z + (p2Vec.z - p1Vec.z) * f;
-          }
+      if (Math.abs(theta) < 0.0001 || Math.abs(Math.sin(theta)) < 0.0001) { // If vectors are collinear or nearly collinear, use LERP
+        for (let t = 0; t <= steps; t++) {
+          const f = t / steps;
+          const lerpVec = new THREE.Vector3().lerpVectors(p1Vec, p2Vec, f);
+          lerpVec.normalize().multiplyScalar(radius); // Ensure it's on the sphere of desired radius
+          arcForThree.push({ x: lerpVec.x, y: lerpVec.y, z: lerpVec.z });
         }
+      } else {
+        const sinTheta = Math.sin(theta);
+        for (let t = 0; t <= steps; t++) {
+          const f = t / steps;
+          const c1 = Math.sin((1 - f) * theta) / sinTheta;
+          const c2 = Math.sin(f * theta) / sinTheta;
 
-
-        // Ensure normalization and scaling happens correctly
-        if (currentArcVec.lengthSq() > 0) { // Check if slerp/lerp resulted in a non-zero vector
-             // slerp already normalizes, so just scale. Lerp needs normalization.
-             currentArcVec.normalize().multiplyScalar(radius);
-             arcForThree.push({ x: currentArcVec.x, y: currentArcVec.y, z: currentArcVec.z });
-        } else {
-            // If slerp/lerp results in zero vector (e.g. opposite points), use lerp as fallback
-            const fallbackPt = new THREE.Vector3();
-            fallbackPt.copy(p1Vec);
-            // Explicitly call lerp via prototype
-            if (typeof THREE.Vector3.prototype.lerp === 'function') {
-                THREE.Vector3.prototype.lerp.call(fallbackPt, p2Vec,f);
-            } else {
-                console.error("THREE.Vector3.prototype.lerp is not a function for fallback!");
-                fallbackPt.x = p1Vec.x + (p2Vec.x - p1Vec.x) * f;
-                fallbackPt.y = p1Vec.y + (p2Vec.y - p1Vec.y) * f;
-                fallbackPt.z = p1Vec.z + (p2Vec.z - p1Vec.z) * f;
-            }
-            fallbackPt.normalize().multiplyScalar(radius);
-            arcForThree.push({ x: fallbackPt.x, y: fallbackPt.y, z: fallbackPt.z });
+          const arcVec = new THREE.Vector3(
+            c1 * p1Vec.x + c2 * p2Vec.x,
+            c1 * p1Vec.y + c2 * p2Vec.y,
+            c1 * p1Vec.z + c2 * p2Vec.z
+          );
+          // The slerp formula with these coefficients should result in a vector on the unit sphere
+          // if p1Vec and p2Vec were normalized. Then we scale by the desired radius.
+          // For safety, explicitly normalize before scaling if precision issues are a concern.
+          arcVec.normalize().multiplyScalar(radius); 
+          arcForThree.push({ x: arcVec.x, y: arcVec.y, z: arcVec.z });
         }
       }
-      // Convert THREE.Vector3[] back to Point3D[] for state
       setPathPoints(arcForThree);
     } else {
       setPathPoints([]);
     }
-  }, [startNode, endNode, points, radius, nodes]); // nodes dependency for safety if node data influences path
+  }, [startNode, endNode, points, radius]);
 
 
   interface NodeMeshProps {
@@ -333,3 +313,4 @@ const DynamicMapRenderer: React.FC<DynamicMapRendererProps> = ({
 };
 
 export default DynamicMapRenderer;
+
